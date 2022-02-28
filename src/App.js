@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import idl from "./idl.json";
 import { Connection, PublicKey, clusterApiUrl } from "@solana/web3.js";
 import { Program, Provider, web3 } from "@project-serum/anchor";
-import kp from './keypair.json'
+import kp from "./keypair.json";
 
 // Constants
 const TWITTER_HANDLE = "_buildspace";
@@ -17,12 +17,12 @@ const TEST_GIFS = [
   "https://media.giphy.com/media/em49D28C8H8DWg7OXO/giphy.gif",
 ];
 
-const { SystemProgram} = web3;
+const { SystemProgram } = web3;
 
 // Create a keypair for the account that will hold the GIF data.
-const arr = Object.values(kp._keypair.secretKey)
-const secret = new Uint8Array(arr)
-const baseAccount = web3.Keypair.fromSecretKey(secret)
+const arr = Object.values(kp._keypair.secretKey);
+const secret = new Uint8Array(arr);
+const baseAccount = web3.Keypair.fromSecretKey(secret);
 
 // Get our program's id from the IDL file.
 const programID = new PublicKey(idl.metadata.address);
@@ -39,6 +39,7 @@ const App = () => {
   const [walletAddress, setWalletAddress] = useState(null);
   const [inputValue, setInputValue] = useState("");
   const [gifs, setGifs] = useState([]);
+  const [present, setPresent] = useState(false);
 
   const checkSolanaWalletExists = async () => {
     try {
@@ -74,7 +75,7 @@ const App = () => {
     }
   };
 
-  const handleSubmit = async(e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
 
     const provider = getProvider();
@@ -84,15 +85,17 @@ const App = () => {
       baseAccount.publicKey
     );
 
-    const tx1 = await program.rpc.addGifs(inputValue,{
+    const tx1 = await program.rpc.addGifs(inputValue, {
       accounts: {
         baseAccount: baseAccount.publicKey,
-        user: provider.wallet.publicKey
+        user: provider.wallet.publicKey,
       },
-    })
-    let account1 = await program.account.baseAccount.fetch(baseAccount.publicKey);
+    });
+    let account1 = await program.account.baseAccount.fetch(
+      baseAccount.publicKey
+    );
     const total_gifs = account1.totalGifs.toString();
-    const allGifs = account1.gifList
+    const allGifs = account1.gifList;
     console.log(total_gifs, allGifs);
 
     await getGifList();
@@ -142,9 +145,13 @@ const App = () => {
             </button>
           </form>
           <div className="gif-grid">
-            {gifs.map((gif) => (
+            {gifs.map((gif, index) => (
               <div className="gif-item" key={gif.gifLink}>
-                <img src={gif.gifLink} alt={gif.gifLink} />
+                <img src={gif.gifLink} alt={gif.gifLink} /><br />
+                <button
+                  className="cta-button connect-wallet-button"
+                  onClick={() => upvoteGif(index)}
+                >Upvote {present && gif.upvotes.words[0]}</button>
               </div>
             ))}
           </div>
@@ -152,6 +159,30 @@ const App = () => {
       );
     }
   };
+
+  const upvoteGif = async(index) => {
+    try {
+      console.log(index)
+      console.log(gifs[index].upvotes.words[0])
+      const provider = getProvider();
+      const program = new Program(idl, programID, provider);
+
+      const account = await program.account.baseAccount.fetch(
+        baseAccount.publicKey
+      );
+      const tx1 = await program.rpc.upvote(index, {
+        accounts: {
+          baseAccount: baseAccount.publicKey,
+          user: provider.wallet.publicKey,
+        },
+      });
+      await getGifList();
+      console.log("Upvoted");
+
+    } catch (error) {
+      console.log("Couldnt upvote", error);
+    }
+  }
 
   useEffect(() => {
     const onLoad = async () => {
@@ -171,8 +202,9 @@ const App = () => {
         baseAccount.publicKey
       );
       console.log("Got the account", account);
-
+      console.log(account.totalGifs);
       setGifs(account.gifList);
+      setPresent(true);
     } catch (error) {
       console.log(error);
       setGifs(null);
