@@ -2,9 +2,25 @@ import twitterLogo from "./assets/twitter-logo.svg";
 import "./App.css";
 import { useEffect, useState } from "react";
 import idl from "./idl.json";
-import { Connection, PublicKey, clusterApiUrl } from "@solana/web3.js";
+import {
+  Connection,
+  PublicKey,
+  clusterApiUrl,
+  LAMPORTS_PER_SOL,
+  Transaction,
+  sendAndConfirmTransaction,
+  createMint,
+  getOrCreateAssociatedTokenAccount,
+  mintTo,
+  transfer,
+} from "@solana/web3.js";
 import { Program, Provider, web3 } from "@project-serum/anchor";
+import Wallet from "@project-serum/sol-wallet-adapter";
+import * as w3 from "@solana/web3.js";
 import kp from "./keypair.json";
+import { Button, Header, Image, Modal, Form } from "semantic-ui-react";
+
+const bs58 = require("bs58");
 
 // Constants
 const TWITTER_HANDLE = "_buildspace";
@@ -35,20 +51,27 @@ const opts = {
   preflightCommitment: "processed",
 };
 
+const connection = new Connection(network, opts.preflightCommitment);
+
+const wallet = new Wallet("https://www.sollet.io", network);
+
 const App = () => {
   const [walletAddress, setWalletAddress] = useState(null);
   const [inputValue, setInputValue] = useState("");
   const [gifs, setGifs] = useState([]);
   const [present, setPresent] = useState(false);
+  const [pub, setPub] = useState(null);
+  const [amount, setAmount] = useState(10);
+  const [openModal, setOpenModal] = useState(false);
+  const [checkIndex, setCheckIndex] = useState(0);
+  const [loading, setLoading] = useState(false);
 
   const checkSolanaWalletExists = async () => {
     try {
       const { solana } = window;
       if (solana) {
         if (solana.isPhantom) {
-          console.log(
-            "Solana wallet Found!! yippeee................................................................"
-          );
+          console.log("Solana wallet Found!!");
           const response = await solana.connect({ onlyIfTrusted: true });
           console.log(
             "Connected to solana wallet: ",
@@ -69,9 +92,24 @@ const App = () => {
 
     if (solana) {
       console.log("Wallet is found");
+      // await wallet.connect();
       const response = await solana.connect();
       console.log("Key is: ", response.publicKey.toString());
+      console.log(response);
       setWalletAddress(response.publicKey);
+      setPub(response);
+    }
+  };
+
+  const disconnectWallet = async () => {
+    const { solana } = window;
+
+    if (solana) {
+      console.log("Wallet is found");
+      const response = await solana.disconnect();
+      console.log("Key is: ", response);
+      setWalletAddress(response);
+      // setWalletAddress(response.publicKey);
     }
   };
 
@@ -109,13 +147,17 @@ const App = () => {
   };
 
   const getProvider = () => {
-    const connection = new Connection(network, opts.preflightCommitment);
     const provider = new Provider(
       connection,
       window.solana,
       opts.preflightCommitment
     );
     return provider;
+  };
+
+  const set = (id) => {
+    setCheckIndex(id);
+    setOpenModal(true);
   };
 
   const renderConnectedContainer = () => {
@@ -147,11 +189,25 @@ const App = () => {
           <div className="gif-grid">
             {gifs.map((gif, index) => (
               <div className="gif-item" key={gif.gifLink}>
-                <img src={gif.gifLink} alt={gif.gifLink} /><br />
+                <img src={gif.gifLink} alt={gif.gifLink} />
+                <br />
                 <button
+                  style={{ float: "left" }}
                   className="cta-button connect-wallet-button"
                   onClick={() => upvoteGif(index)}
-                >Upvote {present && gif.upvotes.words[0]}</button>
+                >
+                  Upvote {present && gif.upvotes.words[0]}
+                </button>
+                <br />
+                { loading ? <Button primary loading>Tip</Button> : <Button primary onClick={() => setOpenModal(true)}>Tip</Button>}
+                {/* // </button> : <button
+                //   style={{ float: "left" }}
+                //   className="cta-button submit-gif-button"
+                //   onClick={() => set(index)}
+                //   // onClick={() => setOpenModal(true)}
+                // >
+                //   Tip 
+                // </button>} */}
               </div>
             ))}
           </div>
@@ -160,10 +216,66 @@ const App = () => {
     }
   };
 
-  const upvoteGif = async(index) => {
+  const airDrop = async () => {
     try {
-      console.log(index)
-      console.log(gifs[index].upvotes.words[0])
+      const double = LAMPORTS_PER_SOL * 1.5;
+      console.log(LAMPORTS_PER_SOL);
+      const airdropSignature = await connection.requestAirdrop(
+        walletAddress,
+        double
+      );
+      const result = await connection.confirmTransaction(airdropSignature);
+      console.log(result);
+    } catch (error) {
+      console.log("Couldnt airdrop ", error);
+    }
+  };
+
+  const payUser = async () => {
+    let index = checkIndex;
+    try {
+      setOpenModal(false);
+      setLoading(true);
+      console.log(gifs[index].userAddress.toString());
+      const toAddress = gifs[index].userAddress;
+      console.log(typeof walletAddress, walletAddress);
+      let walletAccountInfo = await connection.getAccountInfo(
+        baseAccount.publicKey
+      );
+      console.log(walletAccountInfo);
+      console.log("Balance before payment", walletAccountInfo.lamports);
+
+      let recentBlockhash = await connection.getRecentBlockhash();
+      let manualTransaction = new Transaction({
+        recentBlockhash: recentBlockhash.blockhash,
+        feePayer: walletAddress,
+      });
+      manualTransaction.add(
+        web3.SystemProgram.transfer({
+          fromPubkey: walletAddress,
+          toPubkey: toAddress,
+          lamports: LAMPORTS_PER_SOL * amount,
+        })
+      );
+      let sign = await window.solana.signTransaction(manualTransaction);
+      let signature = await connection.sendRawTransaction(sign.serialize());
+      let result = await connection.confirmTransaction(
+        signature,
+        "myFirstTransaction"
+      );
+      console.log("sent money", result);
+      alert("Tipped Successfully");
+      setLoading(false)
+    } catch (error) {
+      console.log("Couldnt pay ", error);
+      setOpenModal(false);
+    }
+  };
+
+  const upvoteGif = async (index) => {
+    try {
+      console.log(index);
+      console.log(gifs[index].upvotes.words[0]);
       const provider = getProvider();
       const program = new Program(idl, programID, provider);
 
@@ -178,11 +290,10 @@ const App = () => {
       });
       await getGifList();
       console.log("Upvoted");
-
     } catch (error) {
       console.log("Couldnt upvote", error);
     }
-  }
+  };
 
   useEffect(() => {
     const onLoad = async () => {
@@ -237,6 +348,10 @@ const App = () => {
     }
   };
 
+  const handleAmountChange = (e) => {
+    setAmount(e.target.value);
+  };
+
   useEffect(() => {
     if (walletAddress) {
       console.log("Fetching gif list...");
@@ -247,8 +362,47 @@ const App = () => {
 
   return (
     <div className="App">
+      <Modal
+        onClose={() => setOpenModal(false)}
+        onOpen={() => setOpenModal(true)}
+        open={openModal}
+      >
+        <Modal.Header>Tip the user</Modal.Header>
+        <Modal.Content>
+          <Modal.Description>
+            <Header>Tip</Header>
+            <Form>
+              <Form.Field>
+                <label>Tip Amount</label>
+                <input placeholder="Enter tip amount in SOL" onChange={handleAmountChange} />
+              </Form.Field>
+            </Form>
+          </Modal.Description>
+        </Modal.Content>
+        <Modal.Actions>
+          <Button color="black" onClick={() => setOpenModal(false)}>
+            Cancel Pay
+          </Button>
+          <Button
+            content="Pay"
+            labelPosition="right"
+            icon="checkmark"
+            onClick={payUser}
+            positive
+          />
+        </Modal.Actions>
+      </Modal>
       <div className={walletAddress ? "authed-container" : "container"}>
         <div className="header-container">
+          {walletAddress && (
+            <button
+              className="cta-button submit-gif-button"
+              style={{ textAlign: "right", float: "right" }}
+              onClick={disconnectWallet}
+            >
+              Logout
+            </button>
+          )}
           <p className="header">🖼 World Of F1 in GIF</p>
           <p className="sub-text">View upload all the GIFS to F1 ✨</p>
           {!walletAddress && (
@@ -261,7 +415,7 @@ const App = () => {
           )}
           {walletAddress && renderConnectedContainer()}
         </div>
-        <div className="footer-container">
+        {/* <div className="footer-container">
           <img alt="Twitter Logo" className="twitter-logo" src={twitterLogo} />
           <a
             className="footer-text"
@@ -269,7 +423,7 @@ const App = () => {
             target="_blank"
             rel="noreferrer"
           >{`built on @${TWITTER_HANDLE}`}</a>
-        </div>
+        </div> */}
       </div>
     </div>
   );
